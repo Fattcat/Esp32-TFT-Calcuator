@@ -35,6 +35,12 @@ bool menuOpen = false;
 #define COL_BTN_CLR   TFT_RED
 #define COL_HIST      TFT_YELLOW
 
+#define TFT_CS   15
+#define TFT_DC   2
+#define TFT_RST  4
+
+#define TOUCH_CS 14  // XPT2046 CS
+
 // ============== ŠTRUKTÚRA TLAČIDLA ==============
 struct Button {
   int16_t x, y, w, h;
@@ -106,9 +112,10 @@ void evaluate() {
   if (inputStr.length() == 0) return;
 
   String expr = preprocessExpr(inputStr);
-  double result = te_interp(expr.c_str(), 0);
-  
-  if (te_errno) {
+  int error = 0;
+  double result = te_interp(expr.c_str(), &error);
+
+  if (error) {
     inputStr = "ERR";
   } else {
     // Ulož do histórie
@@ -170,14 +177,14 @@ void drawButton(Button &btn) {
   tft.setTextFont(2);
   tft.setTextSize(1);
   tft.setTextColor(TFT_WHITE);
-  int16_t x1, y1;
-  uint16_t w, h;
-  tft.getTextBounds(btn.label, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h + h) / 2 - 5);
+  // Odhad šírky a výšky (Font 2 ≈ 12 pt → výška ~24px, medzera ~4px)
+  int w = tft.textWidth(btn.label);
+  int h = 24; // približná výška riadku fontu 2
+  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h + h) / 2 - 4);
   tft.print(btn.label);
 }
 
-void drawMenuIcon(int x, y) {
+void drawMenuIcon(int x,int y) {
   tft.fillRoundRect(x, y, 30, 4, 2, TFT_WHITE);
   tft.fillRoundRect(x, y + 8, 30, 4, 2, TFT_WHITE);
   tft.fillRoundRect(x, y + 16, 30, 4, 2, TFT_WHITE);
@@ -233,70 +240,81 @@ void createButtons() {
     int x = startX + col * (btnW + gap);
     int y = startY + row * (btnH + gap);
     String lbl = labelsBasic[i];
-    buttons.push_back({
-      x, y, btnW, btnH, lbl, colorsBasic[i],
-      [lbl]() {
-        if (lbl == "=") evaluate();
-        else if (lbl == "C") clearInput();
-        else if (lbl == "⌫") backspace();
-        else insertChar(lbl);
-      },
-      (currentPage == PAGE_BASIC)
-    });
+
+    Button btn;
+    btn.x = x; btn.y = y; btn.w = btnW; btn.h = btnH;
+    btn.label = lbl;
+    btn.color = colorsBasic[i];
+    btn.visible = (currentPage == PAGE_BASIC);
+    btn.onClick = [lbl]() {
+      if (lbl == "=") evaluate();
+      else if (lbl == "C") clearInput();
+      else if (lbl == "⌫") backspace();
+      else insertChar(lbl);
+    };
+    buttons.push_back(btn);
   }
 
   // Pokročilé funkcie (PAGE_ADVANCED)
   String labelsAdv[] = {"sin","cos","tan","cot","√",
                         "x²","xʸ","log","ln","!",
                         "abs","floor","ceil","rand","mod"};
+
   for (int i = 0; i < 15; i++) {
     int row = i / 5;
     int col = i % 5;
     int x = startX + col * (btnW + gap);
     int y = startY + row * (btnH + gap);
     String lbl = labelsAdv[i];
-    buttons.push_back({
-      x, y, btnW, btnH, lbl, COL_BTN_FUNC,
-      [lbl]() {
-        if (lbl == "√") insertChar("sqrt(");
-        else if (lbl == "x²") insertChar("^2");
-        else if (lbl == "xʸ") insertChar("^(");
-        else if (lbl == "log") insertChar("log10(");
-        else if (lbl == "ln") insertChar("log(");
-        else if (lbl == "!") insertChar("!");
-        else if (lbl == "abs") insertChar("abs(");
-        else if (lbl == "floor") insertChar("floor(");
-        else if (lbl == "ceil") insertChar("ceil(");
-        else if (lbl == "rand") insertChar("rand()");
-        else if (lbl == "mod") insertChar("%");
-        else insertChar(lbl + "(");
-      },
-      (currentPage == PAGE_ADVANCED)
-    });
+
+    Button btn;
+    btn.x = x; btn.y = y; btn.w = btnW; btn.h = btnH;
+    btn.label = lbl;
+    btn.color = COL_BTN_FUNC;
+    btn.visible = (currentPage == PAGE_ADVANCED);
+    btn.onClick = [lbl]() {
+      if (lbl == "√") insertChar("sqrt(");
+      else if (lbl == "x²") insertChar("^2");
+      else if (lbl == "xʸ") insertChar("^(");
+      else if (lbl == "log") insertChar("log10(");
+      else if (lbl == "ln") insertChar("log(");
+      else if (lbl == "!") insertChar("!");
+      else if (lbl == "abs") insertChar("abs(");
+      else if (lbl == "floor") insertChar("floor(");
+      else if (lbl == "ceil") insertChar("ceil(");
+      else if (lbl == "rand") insertChar("rand()");
+      else if (lbl == "mod") insertChar("%");
+      else insertChar(lbl + "(");
+    };
+    buttons.push_back(btn);
   }
 
   // Extra operácie (PAGE_EXTRA)
   String labelsExtra[] = {"GCD","LCM","→frac","→dec","%",
                           "deg","rad","hyp","sec","csc",
                           "perm","comb","∑","∏","∫"};
+
   for (int i = 0; i < 15; i++) {
     int row = i / 5;
     int col = i % 5;
     int x = startX + col * (btnW + gap);
     int y = startY + row * (btnH + gap);
     String lbl = labelsExtra[i];
-    buttons.push_back({
-      x, y, btnW, btnH, lbl, TFT_PURPLE,
-      [lbl]() {
-        if (lbl == "→frac") { /* už implementované pri výstupe */ }
-        else if (lbl == "→dec") { /* desatinné už default */ }
-        else if (lbl == "%") insertChar("/100");
-        else if (lbl == "deg") insertChar("*180/π");
-        else if (lbl == "rad") insertChar("*π/180");
-        else insertChar(lbl + "(");
-      },
-      (currentPage == PAGE_EXTRA)
-    });
+
+    Button btn;
+    btn.x = x; btn.y = y; btn.w = btnW; btn.h = btnH;
+    btn.label = lbl;
+    btn.color = TFT_PURPLE;
+    btn.visible = (currentPage == PAGE_EXTRA);
+    btn.onClick = [lbl]() {
+      if (lbl == "→frac") { /* už implementované pri výstupe */ }
+      else if (lbl == "→dec") { /* desatinné už default */ }
+      else if (lbl == "%") insertChar("/100");
+      else if (lbl == "deg") insertChar("*180/π");
+      else if (lbl == "rad") insertChar("*π/180");
+      else insertChar(lbl + "(");
+    };
+    buttons.push_back(btn);
   }
 }
 
